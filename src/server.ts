@@ -34,7 +34,7 @@ server.tool(
       label: z.string().describe('SHORT label, 1-3 words max (e.g. "Yes", "Dark mode", "Skip"). Number prefixes are added automatically. Do NOT put full sentences here.'),
       description: z.string().optional().describe('Longer explanation shown next to the label (e.g. "Use dark theme across all components")'),
     })).max(6).describe('Options for the user to choose from (2-6). Required unless allowFreeText is true.'),
-    allowFreeText: z.boolean().optional().describe('If true, show a text input instead of options. Blocked for sensitive questions. Response capped at 500 chars.'),
+    allowFreeText: z.boolean().optional().describe('If true with no options, shows a text input. If true WITH options, appends an "Other" choice that opens a text input. Blocked for sensitive questions. Response capped at 500 chars.'),
     freeTextPlaceholder: z.string().optional().describe('Placeholder text for the free-text input box'),
     agentId: z.string().optional().describe('Identifier for the calling agent/session'),
     toolChain: z.array(z.string()).optional().describe('Recent tools called before this question'),

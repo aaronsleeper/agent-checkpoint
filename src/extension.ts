@@ -208,9 +208,12 @@ async function showQuestionUI(
   agentId: string,
   toolChain: string[],
 ): Promise<AskUserResponse> {
-  if (request.allowFreeText) {
+  // Free-text only (no options) → straight to input box
+  if (request.allowFreeText && request.options.length === 0) {
     return showFreeTextUI(request, agentId);
   }
+  // Options + free text → QuickPick with "Other" appended
+  // Options only → QuickPick
   return showQuickPickUI(request, classification, agentId, toolChain);
 }
 
@@ -229,11 +232,22 @@ async function showQuickPickUI(
   const chainStr = toolChain.length > 0 ? toolChain.join(' → ') : 'direct';
   const classBadge = classification === 'permission' ? '$(shield) PERMISSION | ' : '';
 
+  const nextNum = request.options.length + 1;
   const items: vscode.QuickPickItem[] = request.options.map((opt, i) => ({
     label: `${i + 1}. ${opt.label}`,
     description: opt.description ?? '',
     detail: opt.id,
   }));
+
+  // Add "Other" option when free text is also allowed
+  if (request.allowFreeText) {
+    items.push({
+      label: `${nextNum}. Other`,
+      description: request.freeTextPlaceholder ?? 'Type a custom answer',
+      detail: '__other__',
+    });
+  }
+
   items.push({
     label: '$(close) Reject this question',
     description: '',
@@ -250,6 +264,11 @@ async function showQuickPickUI(
 
   if (!selected || selected.detail === 'rejected') {
     return { selectedOptionId: 'rejected', selectedLabel: 'Rejected', blocked: false };
+  }
+
+  // "Other" selected → follow up with input box
+  if (selected.detail === '__other__') {
+    return showFreeTextUI(request, agentId);
   }
 
   const matched = request.options.find(o => o.id === selected.detail);
