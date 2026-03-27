@@ -7,6 +7,7 @@ import { AskUserRequest, AskUserResponse, AuditEntry, PortInfo, QuestionClass } 
 import { classifyQuestion } from './classifier.js';
 import { RateLimiter } from './rate-limiter.js';
 import { AuditLog } from './audit.js';
+import { getQuestionWebviewHtml } from './webview.js';
 
 let server: http.Server | undefined;
 let auditLog: AuditLog;
@@ -194,54 +195,44 @@ function logAudit(
 
 // ─── VS Code UI ─────────────────────────────────────────────────────────────
 
+/**
+ * Show the question to the user.
+ * - informational → QuickPick (fast, lightweight)
+ * - permission → Webview panel (full provenance, "Why?" panel)
+ */
 async function showQuestionUI(
   request: AskUserRequest,
   classification: QuestionClass,
   agentId: string,
   toolChain: string[],
 ): Promise<AskUserResponse> {
+  if (classification === 'informational') {
+    return showQuickPickUI(request, agentId, toolChain);
+  }
+  return showWebviewUI(request, classification, agentId, toolChain);
+}
+
+/** Lightweight QuickPick for informational questions */
+async function showQuickPickUI(
+  request: AskUserRequest,
+  agentId: string,
+  toolChain: string[],
+): Promise<AskUserResponse> {
   const stats = rateLimiter.stats();
-  const classIcon = classification === 'permission' ? '$(shield)' : '$(comment-discussion)';
   const chainStr = toolChain.length > 0 ? toolChain.join(' → ') : 'direct';
 
-  // Build provenance header (non-forgeable — comes from extension, not agent)
-  const provenanceLines = [
-    `${classIcon} ${classification.toUpperCase()}`,
-    `Agent: ${agentId}`,
-    `Tool chain: ${chainStr}`,
-    `Questions this session: ${stats.sessionCount}`,
-  ];
-
-  // Use QuickPick for rich UI
   const items: vscode.QuickPickItem[] = request.options.map(opt => ({
     label: opt.label,
     description: opt.description ?? '',
     detail: opt.id,
   }));
-
-  // Add reject option at the bottom
-  items.push({
-    label: '$(close) Reject',
-    description: 'Dismiss this question',
-    detail: 'rejected',
-    kind: vscode.QuickPickItemKind.Separator,
-  } as vscode.QuickPickItem);
   items.push({
     label: '$(close) Reject this question',
     description: '',
     detail: 'rejected',
   });
 
-  // If permission class, add a "Why?" info option
-  if (classification === 'permission') {
-    items.push({
-      label: '$(info) Why am I being asked this?',
-      description: '',
-      detail: '__why__',
-    });
-  }
-
-  const provenance = provenanceLines.join('  |  ');
+  const provenance = `Agent: ${agentId}  |  ${chainStr}  |  Q#${stats.sessionCount}`;
 
   const selected = await vscode.window.showQuickPick(items, {
     title: `Agent Question [${provenance}]`,
@@ -249,31 +240,74 @@ async function showQuestionUI(
     ignoreFocusOut: true,
   });
 
-  // Handle "Why?" selection — show detail, then re-prompt
-  if (selected?.detail === '__why__') {
-    await vscode.window.showInformationMessage(
-      `Agent "${agentId}" asked this after: ${chainStr}.\n\nClassification: ${classification}\nSession question count: ${stats.sessionCount}`,
-      { modal: true },
-      'OK',
-    );
-    // Re-show the question (without Why option to avoid infinite loop)
-    return showQuestionUI(request, 'informational', agentId, toolChain);
-  }
-
   if (!selected || selected.detail === 'rejected') {
-    return {
-      selectedOptionId: 'rejected',
-      selectedLabel: 'Rejected',
-      blocked: false,
-    };
+    return { selectedOptionId: 'rejected', selectedLabel: 'Rejected', blocked: false };
   }
 
-  const matchedOption = request.options.find(o => o.id === selected.detail);
+  const matched = request.options.find(o => o.id === selected.detail);
   return {
-    selectedOptionId: matchedOption?.id ?? selected.detail ?? 'unknown',
-    selectedLabel: matchedOption?.label ?? selected.label,
+    selectedOptionId: matched?.id ?? selected.detail ?? 'unknown',
+    selectedLabel: matched?.label ?? selected.label,
     blocked: false,
   };
+}
+
+/** Full webview panel for permission-class questions */
+function showWebviewUI(
+  request: AskUserRequest,
+  classification: QuestionClass,
+  agentId: string,
+  toolChain: string[],
+): Promise<AskUserResponse> {
+  const stats = rateLimiter.stats();
+
+  return new Promise((resolve) => {
+    const panel = vscode.window.createWebviewPanel(
+      'agentCheckpointQuestion',
+      `Agent Question — ${classification.toUpperCase()}`,
+      { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
+      { enableScripts: true, retainContextWhenHidden: false },
+    );
+
+    let resolved = false;
+    const finish = (response: AskUserResponse) => {
+      if (resolved) return;
+      resolved = true;
+      panel.dispose();
+      resolve(response);
+    };
+
+    // Generate secure nonce for CSP
+    const nonce = crypto.randomBytes(16).toString('base64');
+
+    panel.webview.html = getQuestionWebviewHtml({
+      question: request.question,
+      options: request.options,
+      classification,
+      agentId,
+      toolChain,
+      sessionCount: stats.sessionCount,
+      nonce,
+    });
+
+    // Listen for messages from the webview
+    panel.webview.onDidReceiveMessage((msg: { command: string; optionId?: string; optionLabel?: string }) => {
+      if (msg.command === 'select' && msg.optionId) {
+        finish({
+          selectedOptionId: msg.optionId,
+          selectedLabel: msg.optionLabel ?? msg.optionId,
+          blocked: false,
+        });
+      } else if (msg.command === 'reject') {
+        finish({ selectedOptionId: 'rejected', selectedLabel: 'Rejected', blocked: false });
+      }
+    });
+
+    // If panel is closed without selection → treat as rejection
+    panel.onDidDispose(() => {
+      finish({ selectedOptionId: 'rejected', selectedLabel: 'Rejected (dismissed)', blocked: false });
+    });
+  });
 }
 
 // ─── Audit Log Viewer ───────────────────────────────────────────────────────
