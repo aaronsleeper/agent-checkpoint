@@ -26,13 +26,13 @@ const server = new McpServer({
 
 server.tool(
   'ask_user',
-  'Ask the user a question via VS Code UI. Supports multiple-choice (bottom-right toast for ≤4 options, QuickPick for more) or free-text input. Questions are classified, rate-limited, and audited. Sensitive questions (credentials, keys, payments) will be blocked — instruct the user directly instead.',
+  'Ask the user a question via VS Code QuickPick UI. Options appear as a vertical list with number prefixes (1. 2. 3.) so the user can type a digit to filter and Enter to select. IMPORTANT: Keep option labels to 1-3 words (e.g. "Yes", "Dark mode", "Skip for now"). Put details in the description field, not the label. Questions are classified, rate-limited, and audited. Sensitive questions (credentials, keys, payments) will be blocked.',
   {
-    question: z.string().describe('The question to ask the user'),
+    question: z.string().describe('The question to ask the user. Be concise — this appears as placeholder text in the QuickPick.'),
     options: z.array(z.object({
-      id: z.string().describe('Unique identifier for this option'),
-      label: z.string().describe('Display text for the option (keep short — shown as button)'),
-      description: z.string().optional().describe('Additional context for the option'),
+      id: z.string().describe('Unique identifier for this option (e.g. "yes", "dark", "skip")'),
+      label: z.string().describe('SHORT label, 1-3 words max (e.g. "Yes", "Dark mode", "Skip"). Number prefixes are added automatically. Do NOT put full sentences here.'),
+      description: z.string().optional().describe('Longer explanation shown next to the label (e.g. "Use dark theme across all components")'),
     })).max(6).describe('Options for the user to choose from (2-6). Required unless allowFreeText is true.'),
     allowFreeText: z.boolean().optional().describe('If true, show a text input instead of options. Blocked for sensitive questions. Response capped at 500 chars.'),
     freeTextPlaceholder: z.string().optional().describe('Placeholder text for the free-text input box'),
