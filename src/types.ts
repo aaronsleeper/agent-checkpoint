@@ -48,6 +48,10 @@ export interface AuditEntry {
   blocked: boolean;
   blockReason?: string;
   toolChain: string[];
+  /** SHA-256 hash of the previous entry — forms a tamper-evident chain */
+  prevHash?: string;
+  /** SHA-256 hash of this entry (computed over all fields except this one) */
+  hash?: string;
 }
 
 /** Rate limiter configuration */

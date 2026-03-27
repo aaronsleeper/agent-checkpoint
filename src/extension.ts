@@ -30,6 +30,7 @@ export function activate(context: vscode.ExtensionContext) {
   // Register commands
   context.subscriptions.push(
     vscode.commands.registerCommand('agentCheckpoint.showAuditLog', () => showAuditLog()),
+    vscode.commands.registerCommand('agentCheckpoint.verifyAuditLog', () => verifyAuditLog()),
     vscode.commands.registerCommand('agentCheckpoint.resetSession', () => {
       rateLimiter.reset();
       vscode.window.showInformationMessage('Agent Checkpoint: Session counters reset.');
@@ -312,21 +313,74 @@ function showWebviewUI(
 
 // ─── Audit Log Viewer ───────────────────────────────────────────────────────
 
-function showAuditLog() {
-  const entries = auditLog.readRecent(30);
-  if (entries.length === 0) {
+async function showAuditLog() {
+  const dates = auditLog.listDates();
+  if (dates.length === 0) {
     vscode.window.showInformationMessage('Agent Checkpoint: No audit entries yet.');
     return;
   }
 
-  const lines = entries.map(e => {
+  // If multiple dates, let user pick; otherwise show today's
+  let date: string;
+  if (dates.length === 1) {
+    date = dates[0];
+  } else {
+    const picked = await vscode.window.showQuickPick(
+      dates.reverse().map(d => ({ label: d })),
+      { placeHolder: 'Select a date to view' },
+    );
+    if (!picked) return;
+    date = picked.label;
+  }
+
+  const entries = auditLog.readDate(date, 200);
+  const lines = entries.map((e, i) => {
     const status = e.blocked ? `BLOCKED: ${e.blockReason}` : `→ ${e.selectedLabel}`;
-    return `[${e.timestamp}] ${e.classification.toUpperCase()} | ${e.agentId} | "${e.question}" | ${status}`;
+    const chain = e.hash ? `[${e.hash.slice(0, 8)}]` : '[no-hash]';
+    return `${chain} [${e.timestamp}] ${e.classification.toUpperCase()} | ${e.agentId} | "${e.question}" | ${status}`;
   });
 
-  const doc = vscode.workspace.openTextDocument({
-    content: lines.join('\n'),
+  const header = `# Agent Checkpoint Audit Log — ${date}\n# ${entries.length} entries | hash chain: ${entries[0]?.prevHash?.slice(0, 8) ?? 'GENESIS'} → ${entries[entries.length - 1]?.hash?.slice(0, 8) ?? '?'}\n\n`;
+  const doc = await vscode.workspace.openTextDocument({
+    content: header + lines.join('\n'),
     language: 'log',
   });
-  doc.then(d => vscode.window.showTextDocument(d));
+  vscode.window.showTextDocument(doc);
+}
+
+async function verifyAuditLog() {
+  const dates = auditLog.listDates();
+  if (dates.length === 0) {
+    vscode.window.showInformationMessage('Agent Checkpoint: No audit logs to verify.');
+    return;
+  }
+
+  let allValid = true;
+  const results: string[] = [];
+
+  for (const date of dates) {
+    const result = auditLog.verify(date);
+    if (result.valid) {
+      results.push(`✓ ${date}: ${result.checked} entries — chain intact`);
+    } else {
+      allValid = false;
+      results.push(`✗ ${date}: BROKEN at entry ${result.brokenAt} — ${result.reason}`);
+    }
+  }
+
+  if (allValid) {
+    vscode.window.showInformationMessage(
+      `Agent Checkpoint: All ${dates.length} log file(s) verified — hash chain intact.`,
+    );
+  } else {
+    vscode.window.showWarningMessage(
+      'Agent Checkpoint: Hash chain integrity failure detected. Check the verification report.',
+    );
+  }
+
+  const doc = await vscode.workspace.openTextDocument({
+    content: `# Agent Checkpoint — Hash Chain Verification\n# ${new Date().toISOString()}\n\n${results.join('\n')}`,
+    language: 'log',
+  });
+  vscode.window.showTextDocument(doc);
 }

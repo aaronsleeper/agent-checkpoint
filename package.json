@@ -17,6 +17,10 @@
         "title": "Agent Checkpoint: Show Audit Log"
       },
       {
+        "command": "agentCheckpoint.verifyAuditLog",
+        "title": "Agent Checkpoint: Verify Audit Log Integrity"
+      },
+      {
         "command": "agentCheckpoint.resetSession",
         "title": "Agent Checkpoint: Reset Session Counters"
       }
