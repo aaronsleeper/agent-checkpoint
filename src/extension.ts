@@ -199,8 +199,8 @@ function logAudit(
 /**
  * Route the question to the best UI surface:
  * - Free-text → input box (informational only; blocked for sensitive)
- * - ≤4 options, informational → bottom-right notification toast
- * - >4 options or permission → QuickPick with number prefixes
+ * - All option-based questions → QuickPick (vertical list, grabs focus,
+ *   number-key filtering via 1./2./3. prefixes, supports long labels)
  */
 async function showQuestionUI(
   request: AskUserRequest,
@@ -208,70 +208,26 @@ async function showQuestionUI(
   agentId: string,
   toolChain: string[],
 ): Promise<AskUserResponse> {
-  // Free-text mode
   if (request.allowFreeText) {
     return showFreeTextUI(request, agentId);
   }
-
-  // Permission-class → QuickPick (more visible, number keys)
-  if (classification === 'permission') {
-    return showQuickPickUI(request, agentId, toolChain);
-  }
-
-  // ≤4 options → bottom-right notification toast (feels like permissions sheet)
-  if (request.options.length <= 4) {
-    return showNotificationUI(request, agentId, toolChain);
-  }
-
-  // Fallback → QuickPick with number prefixes
-  return showQuickPickUI(request, agentId, toolChain);
+  return showQuickPickUI(request, classification, agentId, toolChain);
 }
 
 /**
- * Bottom-right notification toast — lightweight, permission-sheet feel.
- * Supports up to 4 option buttons. User sees it in the corner without
- * losing focus on their current work.
+ * QuickPick — vertical list, immediate keyboard focus.
+ * Type a digit to filter to that option, Enter to confirm.
+ * Permission-class questions show the classification badge in the title.
  */
-async function showNotificationUI(
-  request: AskUserRequest,
-  agentId: string,
-  toolChain: string[],
-): Promise<AskUserResponse> {
-  const stats = rateLimiter.stats();
-  const chainStr = toolChain.length > 0 ? toolChain.join(' → ') : 'direct';
-  const prefix = `[${agentId} · Q#${stats.sessionCount}]`;
-
-  // Build button labels with number prefixes for keyboard affordance
-  const buttonLabels = request.options.map((opt, i) => `${i + 1}. ${opt.label}`);
-
-  const selected = await vscode.window.showInformationMessage(
-    `${prefix} ${request.question}`,
-    { modal: false },
-    ...buttonLabels,
-  );
-
-  if (!selected) {
-    return { selectedOptionId: 'rejected', selectedLabel: 'Rejected (dismissed)', blocked: false };
-  }
-
-  // Match back to the original option by stripping the number prefix
-  const idx = buttonLabels.indexOf(selected);
-  const matched = idx >= 0 ? request.options[idx] : undefined;
-  return {
-    selectedOptionId: matched?.id ?? 'unknown',
-    selectedLabel: matched?.label ?? selected,
-    blocked: false,
-  };
-}
-
-/** QuickPick with number prefixes — type a digit to filter, Enter to confirm */
 async function showQuickPickUI(
   request: AskUserRequest,
+  classification: QuestionClass,
   agentId: string,
   toolChain: string[],
 ): Promise<AskUserResponse> {
   const stats = rateLimiter.stats();
   const chainStr = toolChain.length > 0 ? toolChain.join(' → ') : 'direct';
+  const classBadge = classification === 'permission' ? '$(shield) PERMISSION | ' : '';
 
   const items: vscode.QuickPickItem[] = request.options.map((opt, i) => ({
     label: `${i + 1}. ${opt.label}`,
@@ -284,7 +240,7 @@ async function showQuickPickUI(
     detail: 'rejected',
   });
 
-  const provenance = `Agent: ${agentId}  |  ${chainStr}  |  Q#${stats.sessionCount}`;
+  const provenance = `${classBadge}Agent: ${agentId}  |  ${chainStr}  |  Q#${stats.sessionCount}`;
 
   const selected = await vscode.window.showQuickPick(items, {
     title: `Agent Question [${provenance}]`,
