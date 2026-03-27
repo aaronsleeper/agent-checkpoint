@@ -197,9 +197,10 @@ function logAudit(
 // ─── VS Code UI ─────────────────────────────────────────────────────────────
 
 /**
- * Show the question to the user.
- * - informational → QuickPick (fast, lightweight)
- * - permission → Webview panel (full provenance, "Why?" panel)
+ * Route the question to the best UI surface:
+ * - Free-text → input box (informational only; blocked for sensitive)
+ * - ≤4 options, informational → bottom-right notification toast
+ * - >4 options or permission → QuickPick with number prefixes
  */
 async function showQuestionUI(
   request: AskUserRequest,
@@ -207,13 +208,63 @@ async function showQuestionUI(
   agentId: string,
   toolChain: string[],
 ): Promise<AskUserResponse> {
-  if (classification === 'informational') {
+  // Free-text mode
+  if (request.allowFreeText) {
+    return showFreeTextUI(request, agentId);
+  }
+
+  // Permission-class → QuickPick (more visible, number keys)
+  if (classification === 'permission') {
     return showQuickPickUI(request, agentId, toolChain);
   }
-  return showWebviewUI(request, classification, agentId, toolChain);
+
+  // ≤4 options → bottom-right notification toast (feels like permissions sheet)
+  if (request.options.length <= 4) {
+    return showNotificationUI(request, agentId, toolChain);
+  }
+
+  // Fallback → QuickPick with number prefixes
+  return showQuickPickUI(request, agentId, toolChain);
 }
 
-/** Lightweight QuickPick for informational questions */
+/**
+ * Bottom-right notification toast — lightweight, permission-sheet feel.
+ * Supports up to 4 option buttons. User sees it in the corner without
+ * losing focus on their current work.
+ */
+async function showNotificationUI(
+  request: AskUserRequest,
+  agentId: string,
+  toolChain: string[],
+): Promise<AskUserResponse> {
+  const stats = rateLimiter.stats();
+  const chainStr = toolChain.length > 0 ? toolChain.join(' → ') : 'direct';
+  const prefix = `[${agentId} · Q#${stats.sessionCount}]`;
+
+  // Build button labels with number prefixes for keyboard affordance
+  const buttonLabels = request.options.map((opt, i) => `${i + 1}. ${opt.label}`);
+
+  const selected = await vscode.window.showInformationMessage(
+    `${prefix} ${request.question}`,
+    { modal: false },
+    ...buttonLabels,
+  );
+
+  if (!selected) {
+    return { selectedOptionId: 'rejected', selectedLabel: 'Rejected (dismissed)', blocked: false };
+  }
+
+  // Match back to the original option by stripping the number prefix
+  const idx = buttonLabels.indexOf(selected);
+  const matched = idx >= 0 ? request.options[idx] : undefined;
+  return {
+    selectedOptionId: matched?.id ?? 'unknown',
+    selectedLabel: matched?.label ?? selected,
+    blocked: false,
+  };
+}
+
+/** QuickPick with number prefixes — type a digit to filter, Enter to confirm */
 async function showQuickPickUI(
   request: AskUserRequest,
   agentId: string,
@@ -222,8 +273,8 @@ async function showQuickPickUI(
   const stats = rateLimiter.stats();
   const chainStr = toolChain.length > 0 ? toolChain.join(' → ') : 'direct';
 
-  const items: vscode.QuickPickItem[] = request.options.map(opt => ({
-    label: opt.label,
+  const items: vscode.QuickPickItem[] = request.options.map((opt, i) => ({
+    label: `${i + 1}. ${opt.label}`,
     description: opt.description ?? '',
     detail: opt.id,
   }));
@@ -249,6 +300,41 @@ async function showQuickPickUI(
   return {
     selectedOptionId: matched?.id ?? selected.detail ?? 'unknown',
     selectedLabel: matched?.label ?? selected.label,
+    blocked: false,
+  };
+}
+
+/**
+ * Free-text input box. Only allowed for informational questions —
+ * sensitive questions are blocked before reaching this point.
+ * Response length is capped at 500 chars to limit exfiltration surface.
+ */
+async function showFreeTextUI(
+  request: AskUserRequest,
+  agentId: string,
+): Promise<AskUserResponse> {
+  const stats = rateLimiter.stats();
+  const MAX_LENGTH = 500;
+
+  const value = await vscode.window.showInputBox({
+    title: `[${agentId} · Q#${stats.sessionCount}] ${request.question}`,
+    placeHolder: request.freeTextPlaceholder ?? 'Type your answer...',
+    ignoreFocusOut: true,
+    validateInput: (v) => {
+      if (v.length > MAX_LENGTH) {
+        return `Response too long (${v.length}/${MAX_LENGTH} chars)`;
+      }
+      return null;
+    },
+  });
+
+  if (value === undefined) {
+    return { selectedOptionId: 'rejected', selectedLabel: 'Rejected (dismissed)', blocked: false };
+  }
+
+  return {
+    selectedOptionId: 'free_text',
+    selectedLabel: value,
     blocked: false,
   };
 }

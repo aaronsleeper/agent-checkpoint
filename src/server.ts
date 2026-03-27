@@ -26,14 +26,16 @@ const server = new McpServer({
 
 server.tool(
   'ask_user',
-  'Ask the user a question with predefined options. Questions are classified, rate-limited, and audited by the Agent Checkpoint extension. Sensitive questions (credentials, keys, payments) will be blocked — instruct the user directly instead.',
+  'Ask the user a question via VS Code UI. Supports multiple-choice (bottom-right toast for ≤4 options, QuickPick for more) or free-text input. Questions are classified, rate-limited, and audited. Sensitive questions (credentials, keys, payments) will be blocked — instruct the user directly instead.',
   {
     question: z.string().describe('The question to ask the user'),
     options: z.array(z.object({
       id: z.string().describe('Unique identifier for this option'),
-      label: z.string().describe('Display text for the option'),
+      label: z.string().describe('Display text for the option (keep short — shown as button)'),
       description: z.string().optional().describe('Additional context for the option'),
-    })).min(2).max(6).describe('Options for the user to choose from (2-6)'),
+    })).max(6).describe('Options for the user to choose from (2-6). Required unless allowFreeText is true.'),
+    allowFreeText: z.boolean().optional().describe('If true, show a text input instead of options. Blocked for sensitive questions. Response capped at 500 chars.'),
+    freeTextPlaceholder: z.string().optional().describe('Placeholder text for the free-text input box'),
     agentId: z.string().optional().describe('Identifier for the calling agent/session'),
     toolChain: z.array(z.string()).optional().describe('Recent tools called before this question'),
   },
@@ -53,6 +55,8 @@ server.tool(
       questionId: crypto.randomUUID(),
       question: params.question,
       options: params.options,
+      allowFreeText: params.allowFreeText,
+      freeTextPlaceholder: params.freeTextPlaceholder,
       agentId: params.agentId,
       toolChain: params.toolChain,
       timestamp: Date.now(),

@@ -10,6 +10,8 @@
  *   node out/test-cli.js --sensitive        # sensitive question (should be blocked)
  *   node out/test-cli.js --rapid            # fires 5 rapid questions (rate limit test)
  *   node out/test-cli.js --custom "question" "opt1" "opt2"
+ *   node out/test-cli.js --freetext          # free-form text input
+ *   node out/test-cli.js --toast             # bottom-right toast (≤4 options)
  */
 
 import * as fs from 'fs';
@@ -107,6 +109,35 @@ async function main() {
 
   const args = process.argv.slice(2);
   const mode = args[0] ?? '--informational';
+
+  if (mode === '--freetext') {
+    console.log('Sending free-text question...');
+    const req: AskUserRequest = {
+      questionId: crypto.randomUUID(),
+      question: 'What should we name the new component?',
+      options: [],
+      allowFreeText: true,
+      freeTextPlaceholder: 'e.g. UserProfileCard',
+      agentId: 'test-cli',
+      toolChain: ['Read', 'ask_user'],
+      timestamp: Date.now(),
+    };
+    const res = await send(info, req);
+    console.log(JSON.stringify(res, null, 2));
+    return;
+  }
+
+  if (mode === '--toast') {
+    console.log('Sending toast question (≤4 options, bottom-right)...');
+    const req = makeRequest('Continue with the default configuration?', [
+      { id: 'yes', label: 'Yes' },
+      { id: 'no', label: 'No' },
+      { id: 'customize', label: 'Customize' },
+    ]);
+    const res = await send(info, req);
+    console.log(JSON.stringify(res, null, 2));
+    return;
+  }
 
   if (mode === '--rapid') {
     console.log('Sending 5 rapid questions to test rate limiting...');

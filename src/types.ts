@@ -16,6 +16,10 @@ export interface AskUserRequest {
   question: string;
   /** Available options (if empty, treated as yes/no) */
   options: QuestionOption[];
+  /** Allow free-form text input (blocked for sensitive questions) */
+  allowFreeText?: boolean;
+  /** Placeholder text for free-form input */
+  freeTextPlaceholder?: string;
   /** Which agent/session is asking */
   agentId?: string;
   /** Recent tool chain leading to this question */
