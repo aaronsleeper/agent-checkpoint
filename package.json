@@ -1,0 +1,40 @@
+{
+  "name": "agent-checkpoint",
+  "displayName": "Agent Checkpoint",
+  "description": "Secure MCP server for agent-to-user questions with classification, rate limiting, and audit logging",
+  "version": "0.1.0",
+  "publisher": "cena-health",
+  "engines": {
+    "vscode": "^1.102.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentCheckpoint.showAuditLog",
+        "title": "Agent Checkpoint: Show Audit Log"
+      },
+      {
+        "command": "agentCheckpoint.resetSession",
+        "title": "Agent Checkpoint: Reset Session Counters"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.102.0",
+    "typescript": "^5.7.0",
+    "@vscode/vsce": "^3.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.24.0"
+  }
+}
